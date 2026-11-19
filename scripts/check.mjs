@@ -186,6 +186,12 @@ for (const f of files) {
       for (const [nm, r, owner, tw] of texts) if (owner !== pid && !rects.some(x => x[0] === nm) && up.some(w => meets(w, tw)) && hit(badge, r, 1)) warn.push(`the ✓/✕ badge on "${pid}" covers ${nm}`);
     }
     tl.steps.forEach((s, i) => { if (s.say.length > 120) warn.push(`step ${i + 1}: caption is ${s.say.length} chars; keep it under 120`); });
+    // A default rest always leaves time to read; an explicit hold can cut it short. The last
+    // caption stays up until the sheet fades out.
+    tl.steps.forEach((s, i) => {
+      const up = (i === tl.steps.length - 1 ? tl.period : s.b) - s.a, short = s.read - up;
+      if (s.held && short > 0.05) warn.push(`step ${i + 1}: caption is up ${up.toFixed(1)} s but needs about ${s.read.toFixed(1)} s to read (${s.say.length} chars at 17 a second); raise "hold" to ${(s.b - s.r + short).toFixed(1)} or drop it for the default rest`);
+    });
     const T = tl.total;
     console.log(`\n${f}  ·  ${id}  ·  ${tl.steps.length} steps  ·  ${T.toFixed(1)} s  ·  ${L.order.length} parts, ${Object.keys(L.lines).length} lines`);
     [...new Set(err)].forEach(e => console.log('  ERROR  ' + e));

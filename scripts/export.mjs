@@ -7,7 +7,8 @@
 //   node scripts/export.mjs scene.js --format png --steps         -> one PNG per step (for slides)
 //   node scripts/export.mjs scene.js --format all
 //
-// Options: --out <file or folder> --width 1280 --fps (gif 15, mp4 30) --speed (gif 1.8, mp4 1.25)
+// Options: --out <file or folder> --width 1280 --fps (gif 15, mp4 30) --speed (gif 1.8, mp4 1.25; motion only,
+//          the rests that leave time to read each caption play in real seconds)
 //          --paper blue|linen --hold 1.5 --scale (png 2, else 1) --scene <id> --audio track.mp3 (mp4)
 // --out: a name ending in .png, .gif or .mp4 sets the file name, and every format gets its own
 // extension (--out talk/cache.mp4 --format all -> talk/cache.png, .gif, .mp4; with --steps,
@@ -94,19 +95,19 @@ const browser = await launchChromium(pw).catch(e => {
 // Close the browser and remove the temp frames before exiting on an error.
 let encoder = null;
 async function fail(msg) { console.error(msg); await encoder?.close(); await browser.close().catch(() => {}); rmSync(work, { recursive: true, force: true }); process.exit(1); }
-async function open(scale) {
+async function open(scale, speed = 1) {
   const p = await browser.newPage({ viewport: { width, height: 900 }, deviceScaleFactor: scale });
   p.on('pageerror', e => console.log('PAGE ERROR', String(e)));
   await p.goto(pathToFileURL(join(work, 'page.html')).href);
   await p.evaluate(() => document.fonts.ready.then(() => document.fonts.load('500 12px "IBM Plex Mono"')).catch(() => {}));
-  const info = await p.evaluate(([paper, want]) => {
+  const info = await p.evaluate(([paper, want, speed]) => {
     const ids = Object.keys(BLUEPRINT.scenes);
     if (!ids.length) return { error: 'the file defines no scene' };
     if (want && !BLUEPRINT.scenes[want]) return { error: `no scene "${want}" in the file (it has: ${ids.join(', ')})` };
     const id = want || ids[0];
-    window.C = BLUEPRINT.mount(document.getElementById('h'), BLUEPRINT.scenes[id], { play: 'still', controls: false, font: false, paper: paper || undefined });
+    window.C = BLUEPRINT.mount(document.getElementById('h'), BLUEPRINT.scenes[id], { play: 'still', controls: false, font: false, paper: paper || undefined, speed });
     return { id, ids, total: window.C.timeline.total, steps: window.C.timeline.steps.map(s => ({ a: s.a, b: s.b, say: s.say })) };
-  }, [opt.paper, opt.scene]);
+  }, [opt.paper, opt.scene, speed]);
   if (info.error) await fail(info.error);
   if (info.ids.length > 1 && !opt.scene && !noted++) console.warn(`warn: ${files[0]} has ${info.ids.length} scenes (${info.ids.join(', ')}); exporting "${info.id}". Pick one with --scene <id>.`);
   const clip = await p.locator('#h .bp-svg').boundingBox();
@@ -134,10 +135,14 @@ if (formats.includes('png')) {
   }
 }
 
+// Frame times come from the runtime's pacing: motion at --speed, rests in real seconds.
 async function frames(fps, speed, scale) {
-  const { info, shot, clip } = await open(scale);
-  const n = Math.ceil((info.total / speed) * fps), list = [];
-  for (let i = 0; i <= n; i++) list.push(Math.min(info.total, (i / fps) * speed));
+  const { info, shot, clip, p } = await open(scale, speed);
+  const list = await p.evaluate(fps => {
+    const P = window.C.pace, end = window.C.timeline.total, n = Math.ceil(P.total * fps), out = [];
+    for (let i = 0; i <= n; i++) out.push(Math.min(end, P.scene(i / fps)));
+    return out;
+  }, fps);
   return { info, shot, clip, list };
 }
 
@@ -158,7 +163,7 @@ if (formats.includes('gif')) {
   const f = outFor('gif'), bytes = gif.end(); mkdirSync(dirname(f), { recursive: true });
   writeFileSync(f, bytes); written.push(f);
   // READMEs, Slack and X handle GIFs under ~5 MB much better; long complex scenes go over at 1280.
-  if (bytes.length > GIF_MAX) console.warn(`warn: ${basename(f)} is ${(bytes.length / 1e6).toFixed(1)} MB; GIFs over ~5 MB load slowly or get rejected. Try --width 960 (about a third smaller) or --speed 2.4.`);
+  if (bytes.length > GIF_MAX) console.warn(`warn: ${basename(f)} is ${(bytes.length / 1e6).toFixed(1)} MB; GIFs over ~5 MB load slowly or get rejected. Try --width 960 (about a third smaller) or a lower --fps.`);
 }
 
 if (formats.includes('mp4')) {

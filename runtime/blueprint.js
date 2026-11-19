@@ -565,10 +565,14 @@
   var NOTE_KEYS = ['at', 'text', 'dx', 'dy', 'anchor', 'keep', 'pos'];
   var ANCHORS = ['start', 'middle', 'end'];
   var RUN_COUNT_MAX = 50;
+  var READ_CPS = 17, REST_MIN = 1.4;
 
-  function compile(spec, L) {
+  // speed: how fast the motion plays (1 = as written). Rests play in real seconds at any speed,
+  // and a default rest stretches so the step's caption is up long enough to read.
+  function compile(spec, L, speed) {
     L = L || layout(spec);
     if (!isObj(spec)) spec = {};
+    speed = fin(speed) && speed > 0 ? speed : 1;
     var errors = L.errors, warnings = L.warnings, has = function (id) { return !!(L.parts[id] || L.lines[id]); };
     var tl = { steps: [], draws: dict(), sets: dict(), glows: [], marks: [], spins: [], rings: [], lights: [], runs: [], notes: [], views: [] };
     var push = function (map, id, ev) { (map[id] = map[id] || []).push(ev); };
@@ -668,7 +672,10 @@
         effects(s.then, winEnd, winEnd + 1.0, w + ' then');
         last = winEnd + 0.9;
       }
-      st.b = last + opt(s.hold != null ? s.hold : (isObj(s.then) && s.then.hold != null ? s.then.hold : null), 1.4, w + ' hold', 0);
+      var hv = s.hold != null ? s.hold : (isObj(s.then) && s.then.hold != null ? s.then.hold : null), hold = num(hv);
+      st.r = last; st.read = st.say.length / READ_CPS; st.held = hv != null && fin(hold) && hold >= 0;
+      if (hv != null && !st.held) warnings.push(w + ' hold: ' + JSON.stringify(hv) + ' is not a number of at least 0; using the default rest');
+      st.b = last + (st.held ? hold : Math.max(REST_MIN, st.read - (last - st.a) / speed));
       var isLast = i === lastIdx;
       stepMarks.forEach(function (m) { m.b = (m.n && m.n.keep) || isLast ? Infinity : st.b + 0.25; });
       tl.steps.push(st);
@@ -678,7 +685,25 @@
     Object.keys(tl.sets).forEach(function (id) { tl.sets[id].sort(function (x, y) { return x.a - y.a; }); });
     tl.total = t + 0.4;
     tl.period = tl.total + 1.1;
+    tl.speed = speed;
     return tl;
+  }
+
+  // Real seconds against timeline seconds. Motion (up to each step's rest, r) plays at the
+  // timeline's speed; rests (r to b) and the finished sheet play in real time.
+  function pace(tl) {
+    var s = tl.speed || 1, ks = [[0, 0]], at = 0, real = 0;
+    var to = function (t, rate) { if (t > at) { real += (t - at) / rate; at = t; ks.push([at, real]); } };
+    tl.steps.forEach(function (st) { to(st.r, s); to(st.b, 1); });
+    to(tl.period, 1);
+    var map = function (x, i, j) {
+      for (var k = 1; k < ks.length; k++) if (x <= ks[k][i] || k === ks.length - 1) {
+        var p = ks[k - 1], q = ks[k];
+        return q[i] === p[i] ? q[j] : p[j] + (q[j] - p[j]) * (x - p[i]) / (q[i] - p[i]);
+      }
+      return x;
+    };
+    return { total: map(tl.total, 0, 1), period: real, scene: function (r) { return map(r, 1, 0); }, real: function (t) { return map(t, 0, 1); } };
   }
 
   /* ───────────── state at time t ───────────── */
@@ -797,8 +822,8 @@
     return '<circle r="4.6" style="' + st + '"/>';
   }
 
-  function build(spec, theme) {
-    var L = layout(spec), tl = compile(spec, L), id = 'bp' + (++uid), W = L.W, H = L.H;
+  function build(spec, theme, speed) {
+    var L = layout(spec), tl = compile(spec, L, speed), id = 'bp' + (++uid), W = L.W, H = L.H;
     var OW = W + 32, OH = H + 96, T = theme;
     var o = '<svg class="bp-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + OW + ' ' + OH + '" role="img" style="--bp-ink:' + T.ink + ';--bp-muted:' + T.muted + ';--bp-accent:' + T.accent + ';--bp-paper:' + T.bg + ';--bp-fail:' + T.fail + ';--bp-ok:' + T.ok + ';--bp-font:' + FONT + ';--bp-hatch:url(#' + id + '-h)">';
     o += '<defs><pattern id="' + id + '-g" width="16" height="16" patternUnits="userSpaceOnUse"><path d="M16 0 H0 V16" fill="none" stroke="' + T.grid + '" stroke-width=".7"/></pattern>' +
@@ -978,7 +1003,7 @@
     var speed = opts.speed == null ? 1 : num(opts.speed);
     if (!fin(speed) || speed <= 0) { extra.push('speed ' + JSON.stringify(opts.speed) + ' is not a positive number; using 1'); speed = 1; }
     else if (speed < SPEED_MIN || speed > SPEED_MAX) { extra.push('speed ' + speed + ' is outside ' + SPEED_MIN + '…' + SPEED_MAX + '; clamped'); speed = clamp(speed, SPEED_MIN, SPEED_MAX); }
-    var B = build(spec, theme), L = B.L, tl = B.tl;
+    var B = build(spec, theme, speed), L = B.L, tl = B.tl, P = pace(tl);
     extra.forEach(function (w) { L.warnings.push(w); });
     if (root.console) {
       var name = '[blueprint] ' + (spec.title || '');
@@ -1113,24 +1138,24 @@
     // controls
     var bar = null, dots = [], playBtn = null, io = null;
     var ctl = {
-      t: 0, playing: false, stopAt: null, visible: true, destroyed: false, mode: mode, speed: speed,
+      t: 0, rt: 0, playing: false, stopAt: null, visible: true, destroyed: false, mode: mode, speed: speed,
       onStep: function (si) {
         dots.forEach(function (d, i) { if (i === si) d.setAttribute('aria-current', 'step'); else d.removeAttribute('aria-current'); });
       },
       _live: function () { if (this.playing && this.visible && !this.destroyed) { live.add(this); wake(); } else live.delete(this); },
       _tick: function (dt) {
         if (!this.playing || !this.visible) return;
-        this.t += dt * this.speed;
-        if (this.stopAt != null && this.t >= this.stopAt) { this.t = this.stopAt; this.stopAt = null; this.pause(); }
-        else if (this.t >= tl.total && this.mode !== 'loop') { this.t = tl.total; this.pause(); }
-        else if (this.t >= tl.period) this.t = 0;
+        this.rt += dt; this.t = P.scene(this.rt);
+        if (this.stopAt != null && this.t >= this.stopAt) { this.t = this.stopAt; this.rt = P.real(this.t); this.stopAt = null; this.pause(); }
+        else if (this.t >= tl.total && this.mode !== 'loop') { this.t = tl.total; this.rt = P.real(this.t); this.pause(); }
+        else if (this.t >= tl.period) this.t = this.rt = 0;
         update(this.t);
       },
-      _run: function () { if (this.destroyed) return; if (this.t >= tl.total && this.mode !== 'loop') this.t = 0; this.playing = true; this._live(); syncBtn(); },
+      _run: function () { if (this.destroyed) return; if (this.t >= tl.total && this.mode !== 'loop') this.t = this.rt = 0; this.playing = true; this._live(); syncBtn(); },
       play: function () { if (this.destroyed) return; this.stopAt = null; if (reduce) { nextStill(); return; } this._run(); },
       pause: function () { this.playing = false; this._live(); syncBtn(); },
       toggle: function () { if (this.playing) this.pause(); else this.play(); },
-      seek: function (t) { if (this.destroyed) return; t = num(t); if (!fin(t)) return; this.t = clamp(t, 0, tl.period); update(this.t); },
+      seek: function (t) { if (this.destroyed) return; t = num(t); if (!fin(t)) return; this.t = clamp(t, 0, tl.period); this.rt = P.real(this.t); update(this.t); },
       step: function (i) {
         i = Math.floor(num(i));
         if (this.destroyed || !tl.steps.length || !fin(i)) return;
@@ -1139,7 +1164,7 @@
         this.seek(s.a); this.stopAt = s.b - 0.05; this._run();
       },
       stepIndex: function () { return stepAt(this.t); },
-      timeline: tl, layout: L,
+      timeline: tl, pace: P, layout: L,
       destroy: function () {
         if (this.destroyed) return;
         this.pause(); this.destroyed = true; live.delete(this);
@@ -1267,6 +1292,6 @@
 
   return {
     version: VERSION, scene: scene, scenes: SCENES, mount: mount, themes: THEMES, kinds: KINDS,
-    layout: layout, compile: compile, port: port, labelGeom: labelGeom, leaderOf: leaderOf, badgeAt: badgeAt, polyAt: polyAt
+    layout: layout, compile: compile, pace: pace, port: port, labelGeom: labelGeom, leaderOf: leaderOf, badgeAt: badgeAt, polyAt: polyAt
   };
 });

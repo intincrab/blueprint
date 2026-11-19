@@ -108,7 +108,7 @@ Watch any of them at **[blueprint.intincrab.com](https://blueprint.intincrab.com
 | `paper` | `blue` (cyanotype, default) or `linen` (ink on cream) |
 | `key` | Shows the numbered parts list under the sheet |
 | `no-controls` | Hides the play, step and replay bar |
-| `speed` | Playback rate, e.g. `1.25` |
+| `speed` | Playback rate of the motion, e.g. `1.25`; rests stay in real time so captions keep their reading time |
 | `no-font` | Uses the reader's own monospace font instead of fetching IBM Plex Mono from Google Fonts |
 
 Load `blueprint.js` before the scene files; `defer` keeps that order. If a scene can't be found (a misspelled `scene`, or its file loaded before the runtime), the element says so in the sheet's place and in the console.

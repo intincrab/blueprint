@@ -53,7 +53,7 @@ The drawing is done by `runtime/blueprint.js`. You never draw SVG: you write a s
    node <skill-dir>/scripts/export.mjs scene.js --format png     # the finished sheet, 2x
    node <skill-dir>/scripts/export.mjs scene.js --format png --steps   # one PNG per step, for slides
    ```
-   `--format all` writes all three. Useful options: `--out` (a name ending in `.png`/`.gif`/`.mp4` sets the file name and each format keeps its own extension; anything else is a folder), `--scene <id>` (for a file with several scenes), `--width` (default 1280), `--speed` (GIF 1.8×, MP4 1.25×), `--fps`, `--paper`, `--audio track.mp3` (MP4 only; the video sets the length). Keep a GIF under about 5 MB: `export.mjs` warns past that, and a complex scene usually fits with `--width 960`. GIF and PNG need only Playwright. MP4 uses ffmpeg when it is on PATH; otherwise Chromium encodes it (WebCodecs), which covers macOS with nothing else installed; on Linux install ffmpeg, or set `BLUEPRINT_CHROMIUM` to a distro Chromium with H.264 (Fedora's has it). `--encoder ffmpeg|browser` forces one. Exports do not carry the scene's `sources`: give the user the links to post with it. Read one exported frame or the PNG back before handing it over.
+   `--format all` writes all three. Useful options: `--out` (a name ending in `.png`/`.gif`/`.mp4` sets the file name and each format keeps its own extension; anything else is a folder), `--scene <id>` (for a file with several scenes), `--width` (default 1280), `--speed` (GIF 1.8×, MP4 1.25×; it speeds up the motion only, and rests keep their real seconds so captions stay readable), `--fps`, `--paper`, `--audio track.mp3` (MP4 only; the video sets the length). Keep a GIF under about 5 MB: `export.mjs` warns past that, and a complex scene usually fits with `--width 960`. GIF and PNG need only Playwright. MP4 uses ffmpeg when it is on PATH; otherwise Chromium encodes it (WebCodecs), which covers macOS with nothing else installed; on Linux install ffmpeg, or set `BLUEPRINT_CHROMIUM` to a distro Chromium with H.264 (Fedora's has it). `--encoder ffmpeg|browser` forces one. Exports do not carry the scene's `sources`: give the user the links to post with it. Read one exported frame or the PNG back before handing it over.
 
 ## The element
 
@@ -63,7 +63,7 @@ The drawing is done by `runtime/blueprint.js`. You never draw SVG: you write a s
 - `key`: shows the parts list under the sheet ("1 Cache · a drawer by the door…") from each part's `name` and `note`.
 - `no-controls`: hides the play, step and replay bar. Clicking the sheet still pauses and plays.
 - `no-font`: does not load IBM Plex Mono from Google Fonts.
-- `speed`: playback rate, e.g. `speed="1.25"`.
+- `speed`: playback rate of the motion, e.g. `speed="1.25"`. Rests play in real seconds, so captions keep their reading time.
 - Reduced motion shows the finished sheet; the step buttons jump between finished steps. Off-screen scenes do not animate.
 
 ## Incident sheets
@@ -83,7 +83,7 @@ These come from the reading behind the style (Byrne, Victor, Ciechanowski, Thing
 - **But… so….** Every part after the first arrives because of a problem the reader just saw. The caption of the step that shows the problem ends on it ("…and every lookup is slow."); the next step's caption starts with "So" and adds the part.
 - **Number parts in the order they appear** (1, 2, 3…) and refer to them in captions as "(2)". Give every numbered part a `name` and `note` for the key.
 - **Plain words in captions.** Write for a curious twelve-year-old: "a drawer by the door that keeps recent answers", not "an LRU cache layer". Put the term of art in the label (`CACHE`) and the key, once.
-- **One caption, one sentence, under 100 characters.** It says what is happening now, not what happened.
+- **One caption, one sentence, under 100 characters.** It says what is happening now, not what happened. Leave out `hold` and each step rests long enough to read its caption (about 17 characters a second); `check.mjs` warns when an explicit `hold` is too short for its caption.
 - **Yellow is for what moves or matters now.** Red only for a failure, green only for success. Everything else is line work.
 - **Real numbers.** Notes carry real units: `~120 MS`, `4 KB`, `3 TRIES`. Use the `dim` line for a measured span.
 - **Every step changes something.** If a step only has a caption, merge it into the next one.

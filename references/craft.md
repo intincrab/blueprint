@@ -120,7 +120,7 @@ Each step runs in this order: **draw/erase → run, spin, set, glow… (together
   set: { drawer: { fill: 1 }, lock: { open: 0 }, app: { text: 'DONE' } },
   note: { at: 'drawer.e', text: 'FAST · ~2 MS' },   // or an array of notes
   then: { set: { … }, ok: [ … ], glow: [ … ], note: { … } },   // after all runs finish
-  hold: 1.4                            // seconds to rest on the result (default 1.4)
+  hold: 1.4                            // seconds to rest on the result (default: long enough to read the caption)
 }
 ```
 
@@ -150,7 +150,7 @@ run: [
 
 ### Timing
 
-A step lasts: draws (0.85 s each, staggered 0.16 s) + runs + `then` (0.9 s) + `hold`. Aim for 3–6 s per step. A small scene runs 15–30 s, a complex one 35–70 s. The loop fades out and starts again.
+A step lasts: draws (0.85 s each, staggered 0.16 s) + runs + `then` (0.9 s) + `hold`. With no `hold`, the rest is at least 1.4 s and grows so the caption stays up for its length at about 17 characters a second (a 70-character caption gets about 4.1 s from the start of the step). An explicit `hold` wins, and `check.mjs` warns when it leaves a caption up too briefly to read. Aim for 3–6 s per step. A small scene runs 15–30 s, a complex one 35–70 s. The loop fades out and starts again.
 
 ## 5. Layout recipes
 
@@ -190,14 +190,16 @@ A step lasts: draws (0.85 s each, staggered 0.16 s) + runs + `then` (0.9 s) + `h
 
 | format | what you get | good for |
 |---|---|---|
-| `gif` | a looping GIF, 1280 px wide, 1.8× speed, a pause on the finished sheet | READMEs, Slack, Notion, docs |
-| `mp4` | H.264 video, 30 fps, 1.25× speed, optional `--audio` | X, LinkedIn, talks |
+| `gif` | a looping GIF, 1280 px wide, motion at 1.8×, a pause on the finished sheet | READMEs, Slack, Notion, docs |
+| `mp4` | H.264 video, 30 fps, motion at 1.25×, optional `--audio` | X, LinkedIn, talks |
 | `png` | the finished sheet at 2× | thumbnails, docs, social cards |
 | `png --steps` | one PNG per step's end | slide decks |
 
 `--out` ending in `.png`, `.gif` or `.mp4` sets the file name (each format keeps its own extension; `--steps` adds `-01`, `-02`…). Any other `--out` is a folder. `--scene <id>` picks a scene from a file with several. Exports do not include `sources`.
 
-A good GIF stays under about 5 MB: lower `--width` or `--fps`, or raise `--speed`, if it grows past that.
+`--speed` speeds up only the motion: the rests play in real seconds, so every caption keeps its reading time. The `speed` attribute on the element works the same way.
+
+A good GIF stays under about 5 MB: lower `--width` or `--fps` if it grows past that. Long rests cost little, since a GIF stores a still frame once.
 
 ## 8. Mistakes already made
 
