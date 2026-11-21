@@ -9,6 +9,7 @@
 // Frames: "sN:end" = end of step N, "sN:0.5" = halfway through step N,
 // "t:4.2" = 4.2 s in, "end" = the finished drawing. Default: the middle and
 // end of every step. A file with several scenes renders the first; pick another with --scene <id>.
+// --lang zh shows the captions of a scene written in several languages in that one.
 // Exit code 1 when the scene has errors or the page throws.
 import { writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
@@ -26,9 +27,9 @@ for (let i = 0; i < argv.length; i++) {
   if (!v.startsWith('--')) { files.push(v); continue; }
   args[v.slice(2)] = argv[i + 1] && !argv[i + 1].startsWith('--') ? argv[++i] : true;
 }
-const USAGE = 'usage: frames.mjs scene.js [--out sheet.png] [--scene id] [--frames "s1:end,s2:0.5,end"] [--paper blue|linen] [--cols 2] [--width 520]';
-for (const k of ['src', 'out', 'scene', 'frames', 'paper', 'cols', 'width']) if (args[k] === true) { console.error(`--${k} needs a value\n${USAGE}`); process.exit(2); }
-for (const k of Object.keys(args)) if (!['src', 'out', 'scene', 'frames', 'paper', 'cols', 'width'].includes(k)) { console.error(`unknown option --${k}\n${USAGE}`); process.exit(2); }
+const USAGE = 'usage: frames.mjs scene.js [--out sheet.png] [--scene id] [--frames "s1:end,s2:0.5,end"] [--paper blue|linen] [--lang code] [--cols 2] [--width 520]';
+for (const k of ['src', 'out', 'scene', 'frames', 'paper', 'lang', 'cols', 'width']) if (args[k] === true) { console.error(`--${k} needs a value\n${USAGE}`); process.exit(2); }
+for (const k of Object.keys(args)) if (!['src', 'out', 'scene', 'frames', 'paper', 'lang', 'cols', 'width'].includes(k)) { console.error(`unknown option --${k}\n${USAGE}`); process.exit(2); }
 if (files.length > (args.src ? 0 : 1)) { console.error(`frames.mjs renders one scene file; got ${[args.src, ...files].filter(Boolean).join(', ')}\n${USAGE}`); process.exit(2); }
 args.src = args.src || files[0];
 if (!args.src) { console.error(USAGE); process.exit(2); }
@@ -54,7 +55,8 @@ const ids=Object.keys(BLUEPRINT.scenes),want_id=${jsonScript(args.scene || '')};
 if(!ids.length)throw new Error('the file defines no scene');
 if(want_id&&!BLUEPRINT.scenes[want_id])throw new Error('no scene "'+want_id+'" in the file (it has: '+ids.join(', ')+')');
 const id=want_id||ids[0],spec=BLUEPRINT.scenes[id];
-const L=BLUEPRINT.layout(spec);const tl=BLUEPRINT.compile(spec,L);
+const lang=${jsonScript(args.lang || '')}||undefined;
+const L=BLUEPRINT.layout(spec);const tl=BLUEPRINT.compile(spec,L,1,lang);
 window.__report={id:id,ids:ids,errors:L.errors,warnings:L.warnings,steps:tl.steps.length,total:tl.total};
 const want=${jsonScript(args.frames || '')}||tl.steps.map((s,i)=>'s'+(i+1)+':0.5,s'+(i+1)+':end').join(',');
 const g=document.getElementById('g');
@@ -66,7 +68,7 @@ want.split(',').map(x=>x.trim()).filter(Boolean).forEach(f=>{
     t=m[2]==='end'?s.b-0.05:s.a+(s.b-s.a)*(+m[2]);lab=f+'  '+s.say;}
   const d=document.createElement('div');d.className='f';d.innerHTML='<b>'+lab.replace(/</g,'&lt;')+'  (t='+t.toFixed(2)+')</b>';
   const h=document.createElement('div');d.appendChild(h);g.appendChild(d);
-  const c=BLUEPRINT.mount(h,spec,{play:'still',controls:false,font:false,paper:${jsonScript(args.paper || '')}||undefined});
+  const c=BLUEPRINT.mount(h,spec,{play:'still',controls:false,font:false,lang:lang,paper:${jsonScript(args.paper || '')}||undefined});
   c.seek(t);
 });
 </script>`;

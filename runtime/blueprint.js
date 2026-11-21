@@ -15,7 +15,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function (root) {
   'use strict';
 
-  var VERSION = '0.1.0';
+  var VERSION = '0.2.0';
   var HAS_DOM = typeof document !== 'undefined';
 
   /* ───────────── maths ───────────── */
@@ -34,6 +34,10 @@
   var fin = function (v) { return typeof v === 'number' && isFinite(v); };
   var isObj = function (v) { return v != null && typeof v === 'object' && !Array.isArray(v); };
   var ID_RE = /^[A-Za-z0-9_-]+$/;
+  // CJK ideographs, kana, hangul and full-width forms take two columns of monospace text,
+  // and take about twice as long to read per character.
+  var WIDE_RE = /[ᄀ-ᅟ⺀-〾ぁ-㏿㐀-䶿一-鿿ꀀ-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]/;
+  function cols(s) { s = String(s); var n = 0; for (var i = 0; i < s.length; i++) n += WIDE_RE.test(s.charAt(i)) ? 2 : 1; return n; }
   function lev(a, b) {
     var d = [], i, j;
     for (i = 0; i <= a.length; i++) d[i] = [i];
@@ -436,7 +440,8 @@
     var ctrl = [mx - dy / dl * 5, my + dx / dl * 5];
     var anchor = v[0] > 0.3 ? 'start' : v[0] < -0.3 ? 'end' : 'middle';
     var tx = end[0] + v[0] * 4, ty = end[1] + (v[1] > 0.3 ? 11 : v[1] < -0.3 ? -3 : 4);
-    return { d: 'M' + r2(start[0]) + ' ' + r2(start[1]) + ' Q' + r2(ctrl[0]) + ' ' + r2(ctrl[1]) + ' ' + r2(end[0]) + ' ' + r2(end[1]), tx: tx, ty: ty, anchor: anchor, text: String(p.n) };
+    // A part that opens another sheet says so on its numeral: "3 ↗".
+    return { d: 'M' + r2(start[0]) + ' ' + r2(start[1]) + ' Q' + r2(ctrl[0]) + ' ' + r2(ctrl[1]) + ' ' + r2(end[0]) + ' ' + r2(end[1]), tx: tx, ty: ty, anchor: anchor, text: String(p.n) + (p.link ? ' ↗' : '') };
   }
 
   // Where a part's ✓/✕ badge sits: off its top-right corner, or its top-left when the part's
@@ -461,7 +466,7 @@
   }
 
   var SPEC_KEYS = ['title', 'fig', 'sheet', 'paper', 'size', 'parts', 'lines', 'steps', 'colors', 'sources'];
-  var PART_COMMON = ['id', 'kind', 'at', 'size', 'w', 'h', 'label', 'labelAt', 'n', 'lead', 'leadLen', 'name', 'note', 'muted'];
+  var PART_COMMON = ['id', 'kind', 'at', 'size', 'w', 'h', 'label', 'labelAt', 'n', 'lead', 'leadLen', 'name', 'note', 'muted', 'link'];
   var PART_EXTRA = { box: ['hatch'], cabinet: ['rows'], drawer: ['slots'], gear: ['teeth', 'rate', 'angle'], wheel: ['rate', 'angle'], clock: ['rate', 'angle'], stack: ['max'], queue: ['slots'], book: ['max'], switch: ['outs'] };
   var LINE_KEYS = ['id', 'from', 'to', 'via', 'bend', 'kind', 'label', 'labelPos', 'heavy', 'arrow', 'r'];
   var LINE_KINDS = ['track', 'pipe', 'belt', 'wire', 'dim'];
@@ -506,6 +511,7 @@
       } else if (!hasOwn(LEAD, q.lead)) { warnings.push(where + ': unknown lead "' + q.lead + '" (use n, s, e, w, ne, nw, se, sw or [dx, dy]); using ne'); delete q.lead; }
     }
     if (q.labelAt != null && LABEL_AT.indexOf(q.labelAt) < 0) warnings.push(where + ': unknown labelAt "' + q.labelAt + '" (use ' + LABEL_AT.join(', ') + ')');
+    if (q.link != null && !(typeof q.link === 'string' && ID_RE.test(q.link))) { warnings.push(where + ': "link" must be a scene id (letters, digits, _ and -); ignored'); delete q.link; }
     if (q.outs != null) {
       var outs = Array.isArray(q.outs) ? q.outs.slice(0, COUNT_MAX).map(num) : [];
       if (outs.length && outs.every(fin)) { if (q.outs.length > COUNT_MAX) warnings.push(where + ': "outs" is capped at ' + COUNT_MAX); q.outs = outs; }
@@ -565,16 +571,55 @@
   var NOTE_KEYS = ['at', 'text', 'dx', 'dy', 'anchor', 'keep', 'pos'];
   var ANCHORS = ['start', 'middle', 'end'];
   var RUN_COUNT_MAX = 50;
+  // Reading speed in columns a second: 17 Latin characters, about 8.5 CJK ones.
   var READ_CPS = 17, REST_MIN = 1.4;
+  var readTime = function (text) { return cols(text) / READ_CPS; };
+
+  // Captions can come in several languages: say: { en: '…', zh: '…' }. The scene's languages
+  // are the codes its captions use, in the order they first appear; the first is the default.
+  var LANG_RE = /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{1,8})*$/;
+  function sceneLangs(spec) {
+    var out = [];
+    arr(isObj(spec) ? spec.steps : null).forEach(function (s) {
+      if (isObj(s) && isObj(s.say)) Object.keys(s.say).forEach(function (k) {
+        var v = s.say[k];
+        if (LANG_RE.test(k) && typeof v === 'string' && v.trim() && out.indexOf(k) < 0) out.push(k);
+      });
+    });
+    return out;
+  }
+  // The scene language for a reader who prefers `wants` (most preferred first): for each
+  // preference, the same tag, then the same base language (zh-CN finds zh, zh finds zh-Hans).
+  function matchLang(langs, wants) {
+    var low = langs.map(function (l) { return l.toLowerCase(); }), base = function (l) { return l.toLowerCase().split('-')[0]; };
+    var list = arr(wants).filter(function (w) { return typeof w === 'string' && w; });
+    for (var i = 0; i < list.length; i++) {
+      var k = low.indexOf(list[i].toLowerCase());
+      if (k >= 0) return langs[k];
+      for (var j = 0; j < langs.length; j++) if (base(langs[j]) === base(list[i])) return langs[j];
+    }
+    return null;
+  }
+  // A step's caption in a language, or in the first of the scene's languages it has.
+  function sayIn(st, lang, langs) {
+    if (!st.says) return st.text;
+    if (lang && st.says[lang] != null) return st.says[lang];
+    for (var i = 0; i < langs.length; i++) if (st.says[langs[i]] != null) return st.says[langs[i]];
+    return '';
+  }
 
   // speed: how fast the motion plays (1 = as written). Rests play in real seconds at any speed,
-  // and a default rest stretches so the step's caption is up long enough to read.
-  function compile(spec, L, speed) {
+  // and a default rest stretches so the step's caption is up long enough to read, in the
+  // slowest of its languages. lang: which language st.say holds (default: the scene's first).
+  function compile(spec, L, speed, lang) {
     L = L || layout(spec);
     if (!isObj(spec)) spec = {};
     speed = fin(speed) && speed > 0 ? speed : 1;
     var errors = L.errors, warnings = L.warnings, has = function (id) { return !!(L.parts[id] || L.lines[id]); };
-    var tl = { steps: [], draws: dict(), sets: dict(), glows: [], marks: [], spins: [], rings: [], lights: [], runs: [], notes: [], views: [] };
+    var langs = sceneLangs(spec);
+    var sayLang = function (st) { for (var i = 0; i < langs.length; i++) if (st.says[langs[i]] != null) return langs[i]; return ''; };
+    var tl = { steps: [], draws: dict(), sets: dict(), glows: [], marks: [], spins: [], rings: [], lights: [], runs: [], notes: [], views: [],
+      langs: langs, lang: langs.length ? matchLang(langs, [lang]) || langs[0] : null };
     var push = function (map, id, ev) { (map[id] = map[id] || []).push(ev); };
     var check = function (where, ids, partsOnly) {
       return arr(ids).filter(function (id) {
@@ -596,8 +641,24 @@
       var w = 'step ' + (i + 1);
       if (!isObj(s)) { errors.push(w + ' is ' + (s === null ? 'null' : 'not an object') + '; it is skipped (a step is { say, draw, run, … })'); return; }
       unknownKeys(s, STEP_KEYS, w, warnings);
-      var si = tl.steps.length, st = { i: i, a: t, say: s.say != null ? String(s.say) : '' }, cur = t;
-      if (!s.say) warnings.push(w + ': no caption ("say")');
+      var si = tl.steps.length, st = { i: i, a: t, says: null, text: '' }, cur = t;
+      if (isObj(s.say)) {
+        st.says = dict();
+        Object.keys(s.say).forEach(function (k) {
+          var v = s.say[k];
+          if (!LANG_RE.test(k)) warnings.push(w + ' say: "' + k + '" is not a language code like en, zh or pt-BR; ignored');
+          else if (typeof v !== 'string' || !v.trim()) warnings.push(w + ' say: the "' + k + '" caption is empty');
+          else st.says[k] = v;
+        });
+        var have = Object.keys(st.says);
+        if (!have.length) warnings.push(w + ': no caption ("say")');
+        else langs.forEach(function (k) { if (!st.says[k]) warnings.push(w + ': no "' + k + '" caption, so that language shows the "' + sayLang(st) + '" one'); });
+      } else {
+        st.text = s.say != null ? String(s.say) : '';
+        if (!s.say) warnings.push(w + ': no caption ("say")');
+        else if (langs.length) warnings.push(w + ': the caption is one plain string, so it shows in every language; give it { ' + langs.join(', ') + ' }');
+      }
+      st.say = sayIn(st, tl.lang, langs);
       check(w + ' draw', s.draw).forEach(function (id, k) { var a = t + k * 0.16, b = a + 0.85; push(tl.draws, id, { type: 'draw', a: a, b: b }); cur = Math.max(cur, b + 0.2); });
       check(w + ' erase', s.erase).forEach(function (id) { push(tl.draws, id, { type: 'erase', a: t, b: t + 0.5 }); cur = Math.max(cur, t + 0.5); });
       if (s.view) {
@@ -673,7 +734,12 @@
         last = winEnd + 0.9;
       }
       var hv = s.hold != null ? s.hold : (isObj(s.then) && s.then.hold != null ? s.then.hold : null), hold = num(hv);
-      st.r = last; st.read = st.say.length / READ_CPS; st.held = hv != null && fin(hold) && hold >= 0;
+      // Reading time per language; the step rests for the slowest, so one timeline fits all.
+      st.reads = dict();
+      if (st.says) Object.keys(st.says).forEach(function (k) { st.reads[k] = readTime(st.says[k]); });
+      else st.reads[''] = readTime(st.text);
+      st.r = last; st.read = Math.max.apply(null, [0].concat(Object.keys(st.reads).map(function (k) { return st.reads[k]; })));
+      st.held = hv != null && fin(hold) && hold >= 0;
       if (hv != null && !st.held) warnings.push(w + ' hold: ' + JSON.stringify(hv) + ' is not a number of at least 0; using the default rest');
       st.b = last + (st.held ? hold : Math.max(REST_MIN, st.read - (last - st.a) / speed));
       var isLast = i === lastIdx;
@@ -772,6 +838,10 @@
     '.bp-key{margin:10px 0 0;padding:0;list-style:none;display:grid;gap:4px;font:400 12px/1.45 var(--bp-font)}',
     '.bp-key b{font-weight:600;display:inline-block;min-width:1.6em}',
     '.bp-svg:focus-visible{outline:2px solid var(--bp-accent);outline-offset:-5px}',
+    '.bp-svg .bp-link{cursor:pointer;outline:none}',
+    '.bp-svg .bp-lring{fill:none;stroke:var(--bp-accent);stroke-width:1.4;stroke-dasharray:4 3;opacity:0;transition:opacity .15s}',
+    '.bp-svg .bp-link:hover .bp-lring,.bp-svg .bp-link:focus-visible .bp-lring{opacity:1}',
+    '.bp-bar [aria-pressed="true"]{border-color:currentColor}',
     '.bp-err{border:1.6px solid;border-radius:6px;padding:18px 20px;font:400 12px/1.5 ' + FONT + ';letter-spacing:.04em;white-space:pre-wrap;overflow-wrap:anywhere}',
     '.bp-err-hd{font-size:10px;letter-spacing:.16em;opacity:.8;margin:0 0 6px}'
   ].join('\n');
@@ -788,23 +858,45 @@
     l.href = 'https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap'; document.head.appendChild(l);
   }
 
-  // Up to `rows` rows of at most `max` characters. Two rows are balanced; a
+  // The first characters of s that fit in n columns.
+  function fitCols(s, n) { var c = 0, i = 0; while (i < s.length && c + cols(s.charAt(i)) <= n) { c += cols(s.charAt(i)); i++; } return s.slice(0, i); }
+  // Where a caption may break: between words, and between CJK characters (which have no
+  // spaces), but never before closing punctuation. sp: a space comes before this piece.
+  var CLOSE_RE = /^[\u3001\u3002\uff0c\uff0e\uff01\uff1f\uff1a\uff1b\uff09\u300d\u300f\u3009\u300b,.!?:;)]$/;
+  function capTokens(text, max) {
+    var out = [];
+    text.split(' ').forEach(function (w, wi) {
+      var cur = '', first = true;
+      var push = function (s) { if (!s) return; out.push({ t: s, sp: first && wi > 0 }); first = false; };
+      for (var i = 0; i < w.length; i++) {
+        var ch = w.charAt(i);
+        if (WIDE_RE.test(ch) && !CLOSE_RE.test(ch)) { push(cur); cur = ''; push(ch); }
+        else if (CLOSE_RE.test(ch) && !cur && out.length && !first) out[out.length - 1].t += ch;
+        else cur += ch;
+      }
+      push(cur);
+    });
+    // A word wider than a whole row is cut into pieces that fit.
+    var fit = [];
+    out.forEach(function (x) { var t = x.t, sp = x.sp; while (cols(t) > max) { var k = fitCols(t, max); fit.push({ t: k, sp: sp }); t = t.slice(k.length); sp = false; } if (t) fit.push({ t: t, sp: sp }); });
+    return fit;
+  }
+  // Up to `rows` rows of at most `max` columns. Two rows are balanced; a
   // longer caption fills rows greedily and the last row ends in an ellipsis.
   var CAP_ROWS = 3;
   function wrapCaption(text, max, rows) {
     rows = rows || CAP_ROWS; max = Math.max(8, max);
     text = String(text).replace(/\s+/g, ' ').trim();
-    if (text.length <= max) return [text];
-    var words = [];
-    text.split(' ').forEach(function (w) { while (w.length > max) { words.push(w.slice(0, max)); w = w.slice(max); } if (w) words.push(w); });
-    var half = Math.min(max, Math.ceil(text.length / 2) + 6), a = words[0], i = 1;
-    while (i < words.length && (a + ' ' + words[i]).length <= half) { a += ' ' + words[i]; i++; }
-    var b = words.slice(i).join(' ');
-    if (b.length <= max) return b ? [a, b] : [a];
+    if (cols(text) <= max) return [text];
+    var tk = capTokens(text, max), join = function (a, x) { return a ? a + (x.sp ? ' ' : '') + x.t : x.t; };
+    var half = Math.min(max, Math.ceil(cols(text) / 2) + 6), a = tk[0].t, i = 1;
+    while (i < tk.length && cols(join(a, tk[i])) <= half) { a = join(a, tk[i]); i++; }
+    var b = ''; for (var j = i; j < tk.length; j++) b = join(b, tk[j]);
+    if (cols(b) <= max) return b ? [a, b] : [a];
     var out = [], cur = '';
-    words.forEach(function (w) { if (!cur) cur = w; else if ((cur + ' ' + w).length <= max) cur += ' ' + w; else { out.push(cur); cur = w; } });
+    tk.forEach(function (x) { if (!cur) cur = x.t; else if (cols(join(cur, x)) <= max) cur = join(cur, x); else { out.push(cur); cur = x.t; } });
     if (cur) out.push(cur);
-    if (out.length > rows) { out = out.slice(0, rows); out[rows - 1] = out[rows - 1].slice(0, max - 1).replace(/\s+$/, '') + '\u2026'; }
+    if (out.length > rows) { out = out.slice(0, rows); out[rows - 1] = fitCols(out[rows - 1], max - 1).replace(/\s+$/, '') + '\u2026'; }
     return out;
   }
 
@@ -822,8 +914,8 @@
     return '<circle r="4.6" style="' + st + '"/>';
   }
 
-  function build(spec, theme, speed) {
-    var L = layout(spec), tl = compile(spec, L, speed), id = 'bp' + (++uid), W = L.W, H = L.H;
+  function build(spec, theme, speed, lang) {
+    var L = layout(spec), tl = compile(spec, L, speed, lang), id = 'bp' + (++uid), W = L.W, H = L.H;
     var OW = W + 32, OH = H + 96, T = theme;
     var o = '<svg class="bp-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + OW + ' ' + OH + '" role="img" style="--bp-ink:' + T.ink + ';--bp-muted:' + T.muted + ';--bp-accent:' + T.accent + ';--bp-paper:' + T.bg + ';--bp-fail:' + T.fail + ';--bp-ok:' + T.ok + ';--bp-font:' + FONT + ';--bp-hatch:url(#' + id + '-h)">';
     o += '<defs><pattern id="' + id + '-g" width="16" height="16" patternUnits="userSpaceOnUse"><path d="M16 0 H0 V16" fill="none" stroke="' + T.grid + '" stroke-width=".7"/></pattern>' +
@@ -840,7 +932,10 @@
       var P = L.parts[pid], b = P.box, K = P.kind, ld = leaderOf(P), s = '';
       var settable = (tl.sets[pid] || []).some(function (e) { return e.key === 'text'; });
       var lg = labelGeom(P) || (settable ? labelGeom({ p: Object.assign({}, P.p, { label: ' ' }), box: b, kind: K }) : null);
-      s += '<g data-part="' + pid + '" transform="translate(' + r2(b.x) + ' ' + r2(b.y) + ')"><g data-k="body">' + K.draw(b.w, b.h, P.p);
+      var link = P.p.link, to = link && SCENES[link], go = link ? 'Open ' + (to ? (to.fig != null ? 'FIG. ' + to.fig + ': ' : '') + (to.title || link) : 'the sheet "' + link + '"') : '';
+      s += '<g data-part="' + pid + '"' + (link ? ' class="bp-link" data-link="' + esc(link) + '" tabindex="0" role="link" aria-label="' + esc((P.p.name || P.p.label || pid) + '. ' + go) + '"' : '') + ' transform="translate(' + r2(b.x) + ' ' + r2(b.y) + ')">';
+      if (link) s += '<title>' + esc(go) + '</title><rect class="bp-lring" x="-7" y="-7" width="' + r2(b.w + 14) + '" height="' + r2(b.h + 14) + '" rx="7"/>';
+      s += '<g data-k="body">' + K.draw(b.w, b.h, P.p);
       s += '</g>';
       if (lg) s += '<text class="bp-tx' + (P.p.muted ? ' bp-mu' : '') + '" data-k="label" x="' + r2(lg.x) + '" y="' + r2(lg.y) + '" text-anchor="' + lg.anchor + '">' + lg.lines.map(function (t, i) { return '<tspan x="' + r2(lg.x) + '" dy="' + (i ? 11 : 0) + '">' + esc(t) + '</tspan>'; }).join('') + '</text>';
       if (ld) s += '<g data-k="lead"><path class="bp-ln bp-thin" d="' + ld.d + '" pathLength="1" transform="translate(' + r2(-b.x) + ' ' + r2(-b.y) + ')"/><text class="bp-num" x="' + r2(ld.tx - b.x) + '" y="' + r2(ld.ty - b.y) + '" text-anchor="' + ld.anchor + '">' + esc(ld.text) + '</text></g>';
@@ -1003,8 +1098,19 @@
     var speed = opts.speed == null ? 1 : num(opts.speed);
     if (!fin(speed) || speed <= 0) { extra.push('speed ' + JSON.stringify(opts.speed) + ' is not a positive number; using 1'); speed = 1; }
     else if (speed < SPEED_MIN || speed > SPEED_MAX) { extra.push('speed ' + speed + ' is outside ' + SPEED_MIN + '…' + SPEED_MAX + '; clamped'); speed = clamp(speed, SPEED_MIN, SPEED_MAX); }
-    var B = build(spec, theme, speed), L = B.L, tl = B.tl, P = pace(tl);
+    // Caption language: the one asked for, else the reader's browser languages, else the scene's first.
+    var langs = sceneLangs(spec), lang = null;
+    if (langs.length) {
+      if (opts.lang != null && opts.lang !== '') {
+        lang = matchLang(langs, [String(opts.lang)]);
+        if (!lang) extra.push('lang "' + opts.lang + '" is not one of this scene\'s languages (' + langs.join(', ') + ')');
+      }
+      var nav = root.navigator, prefs = nav ? (nav.languages && nav.languages.length ? nav.languages : [nav.language]) : [];
+      lang = lang || matchLang(langs, prefs) || langs[0];
+    }
+    var B = build(spec, theme, speed, lang), L = B.L, tl = B.tl, P = pace(tl);
     extra.forEach(function (w) { L.warnings.push(w); });
+    var trail = arr(opts._trail), resume = opts._resume || null;
     if (root.console) {
       var name = '[blueprint] ' + (spec.title || '');
       if (L.errors.length) root.console.error(name + '\n  ' + L.errors.join('\n  '));
@@ -1013,10 +1119,15 @@
     var wrap = document.createElement('div'); wrap.className = 'bp-wrap'; wrap.innerHTML = B.markup; held.wrap = wrap;
     var svg = wrap.firstChild, q = function (sel, el) { return (el || svg).querySelector(sel); };
     var mq = root.matchMedia ? root.matchMedia('(prefers-reduced-motion: reduce)') : null, reduce = !!(mq && mq.matches);
-    var description = (spec.title ? spec.title + '. ' : '') + tl.steps.map(function (s, i) { return 'Step ' + (i + 1) + ': ' + s.say; }).join(' ');
-    var keyboard = opts.controls === false;
-    function setLabel() { svg.setAttribute('aria-label', description + (keyboard ? (reduce ? ' Press Space or Enter to show the next step.' : ' Press Space or Enter to play or pause.') : '')); }
-    setLabel();
+    var sayOf = function (i) { return sayIn(tl.steps[i], ctl ? ctl.lang : tl.lang, tl.langs); };
+    var keyboard = opts.controls === false, hasLinks = !!svg.querySelector('[data-link]');
+    function setLabel() {
+      var description = (spec.title ? spec.title + '. ' : '') + tl.steps.map(function (s, i) { return 'Step ' + (i + 1) + ': ' + sayOf(i); }).join(' ');
+      svg.setAttribute('aria-label', description + (keyboard ? (reduce ? ' Press Space or Enter to show the next step.' : ' Press Space or Enter to play or pause.') : '') + (hasLinks ? ' Parts marked with an arrow open their own sheet.' : ''));
+    }
+    // A sheet with links is a group, so the linked parts inside it can be reached and announced.
+    if (hasLinks) svg.setAttribute('role', 'group');
+    if (tl.lang) svg.setAttribute('lang', tl.lang);
     // cache nodes
     var keyed = function (el) { var k = {}; Array.prototype.forEach.call(el.querySelectorAll('[data-k]'), function (n) { k[n.getAttribute('data-k')] = n; }); return k; };
     var parts = L.order.map(function (pid) {
@@ -1117,7 +1228,7 @@
       });
       // caption
       var si = t > tl.total ? tl.steps.length - 1 : stepAt(t);
-      var text = si >= 0 ? tl.steps[si].say : '';
+      var text = si >= 0 ? sayOf(si) : '';
       if (text !== lastCap) {
         lastCap = text; var rows = wrapCaption(String(text).toUpperCase(), capMax), dy = rows.length > 2 ? 11 : 13;
         cap.setAttribute('y', B.OH - (rows.length > 2 ? 37 : rows.length > 1 ? 31 : 25));
@@ -1136,9 +1247,9 @@
     }
 
     // controls
-    var bar = null, dots = [], playBtn = null, io = null;
+    var bar = null, dots = [], playBtn = null, backBtn = null, langBtns = [], io = null;
     var ctl = {
-      t: 0, rt: 0, playing: false, stopAt: null, visible: true, destroyed: false, mode: mode, speed: speed,
+      t: 0, rt: 0, playing: false, stopAt: null, visible: true, destroyed: false, mode: mode, speed: speed, lang: tl.lang, langs: tl.langs,
       onStep: function (si) {
         dots.forEach(function (d, i) { if (i === si) d.setAttribute('aria-current', 'step'); else d.removeAttribute('aria-current'); });
       },
@@ -1164,27 +1275,90 @@
         this.seek(s.a); this.stopAt = s.b - 0.05; this._run();
       },
       stepIndex: function () { return stepAt(this.t); },
+      // Show the captions in another of the scene's languages, in place.
+      setLang: function (code) {
+        var l = matchLang(tl.langs, [code]);
+        if (this.destroyed || !l || l === this.lang) return;
+        this.lang = l; lastCap = null; svg.setAttribute('lang', l); setLabel(); syncLangs(); update(this.t);
+      },
+      // Linked sheets: open another scene in this one's place, and come back to where it was.
+      open: function (id, fromPart) {
+        if (this.destroyed) return null;
+        var next = SCENES[id];
+        if (!isObj(next)) { if (root.console) root.console.warn('[blueprint] no scene named "' + id + '" has been loaded, so there is no sheet to open'); return null; }
+        var had = !!(document.activeElement && wrap.contains(document.activeElement));
+        return swapTo(next, { _trail: trail.concat([{ spec: spec, t: this.t, part: fromPart || null }]), _autoplay: true, _focus: had ? 'back' : null });
+      },
+      back: function () {
+        var prev = trail[trail.length - 1];
+        if (this.destroyed || !prev) return null;
+        var had = !!(document.activeElement && wrap.contains(document.activeElement));
+        return swapTo(prev.spec, { _trail: trail.slice(0, -1), _resume: prev, _focus: had ? (prev.part || 'svg') : null });
+      },
+      depth: trail.length,
       timeline: tl, pace: P, layout: L,
       destroy: function () {
         if (this.destroyed) return;
         this.pause(); this.destroyed = true; live.delete(this);
         if (io) io.disconnect();
         if (mq) { if (mq.removeEventListener) mq.removeEventListener('change', onMotion); else if (mq.removeListener) mq.removeListener(onMotion); }
-        svg.removeEventListener('click', onClick); svg.removeEventListener('keydown', onKey);
+        svg.removeEventListener('click', onClick); svg.removeEventListener('keydown', onKey); svg.removeEventListener('keydown', onLinkKey);
         if (wrap.parentNode) wrap.parentNode.removeChild(wrap);
       }
     };
     held.ctl = ctl;
+    // After a linked sheet replaces this one, calls on this controller reach the sheet now
+    // showing (opts.onScene hands over the new controller as well).
+    var own = {};
+    ['play', 'pause', 'toggle', 'seek', 'step', 'stepIndex', 'setLang', 'open', 'back', 'destroy'].forEach(function (k) {
+      var f = own[k] = ctl[k];
+      ctl[k] = function () { return ctl._next ? ctl._next[k].apply(ctl._next, arguments) : f.apply(ctl, arguments); };
+    });
+    function swapTo(next, extra) {
+      var o = Object.assign({}, opts, { _trail: null, _resume: null, _autoplay: false, _focus: null }, extra), c;
+      try { c = mount(host, next, o); } catch (e) { return null; }   // mount shows why in the host; this sheet stays
+      own.destroy.call(ctl); ctl._next = c;
+      if (typeof opts.onScene === 'function') opts.onScene(c);
+      return c;
+    }
+    setLabel();
     function syncBtn() {
       if (!playBtn) return;
       if (reduce) { playBtn.textContent = 'STEP'; playBtn.setAttribute('aria-label', 'Show the next step'); return; }
       playBtn.textContent = ctl.playing ? 'PAUSE' : 'PLAY'; playBtn.setAttribute('aria-label', ctl.playing ? 'Pause' : 'Play');
     }
-    if (opts.controls !== false) {
+    var langName = function (code) { try { return new root.Intl.DisplayNames([code], { type: 'language' }).of(code) || code; } catch (e) { return code; } };
+    function syncLangs() {
+      dots.forEach(function (b, i) { b.setAttribute('aria-label', 'Step ' + (i + 1) + ': ' + sayOf(i)); b.title = sayOf(i); });
+      langBtns.forEach(function (b) { b.setAttribute('aria-pressed', String(b.getAttribute('data-lang') === ctl.lang)); });
+    }
+    // The bar: Back (on a linked sheet, even without controls), then play and steps, then languages.
+    if (opts.controls !== false || trail.length) {
       bar = document.createElement('div'); bar.className = 'bp-bar';
-      bar.innerHTML = '<button type="button" data-a="play">PLAY</button><button type="button" data-a="prev" aria-label="Previous step">&larr;</button><button type="button" data-a="next" aria-label="Next step">&rarr;</button><div class="bp-dots"></div>';
+      if (trail.length) {
+        var up = trail[trail.length - 1].spec;
+        backBtn = document.createElement('button'); backBtn.type = 'button';
+        backBtn.textContent = 'BACK' + (up.fig != null ? ' · FIG. ' + up.fig : '');
+        backBtn.setAttribute('aria-label', 'Back to ' + (up.title || 'the previous sheet'));
+        backBtn.addEventListener('click', function () { ctl.back(); });
+        bar.appendChild(backBtn);
+      }
+    }
+    if (opts.controls !== false) {
+      bar.insertAdjacentHTML('beforeend', '<button type="button" data-a="play">PLAY</button><button type="button" data-a="prev" aria-label="Previous step">&larr;</button><button type="button" data-a="next" aria-label="Next step">&rarr;</button><div class="bp-dots"></div>');
       var dw = bar.querySelector('.bp-dots');
-      tl.steps.forEach(function (s, i) { var b = document.createElement('button'); b.type = 'button'; b.setAttribute('aria-label', 'Step ' + (i + 1) + ': ' + s.say); b.title = s.say; b.addEventListener('click', function () { ctl.step(i); }); dw.appendChild(b); dots.push(b); });
+      if (tl.langs.length > 1) {
+        var lg = document.createElement('div'); lg.setAttribute('role', 'group'); lg.setAttribute('aria-label', 'Caption language'); lg.style.display = 'flex'; lg.style.gap = '4px';
+        tl.langs.forEach(function (code) {
+          var b = document.createElement('button'); b.type = 'button'; b.textContent = code.toUpperCase(); b.title = langName(code);
+          b.setAttribute('data-lang', code); b.setAttribute('lang', code); b.setAttribute('aria-label', langName(code));
+          b.addEventListener('click', function () { ctl.setLang(code); });
+          lg.appendChild(b); langBtns.push(b);
+        });
+        bar.insertBefore(lg, dw);
+      }
+      tl.steps.forEach(function (s, i) { var b = document.createElement('button'); b.type = 'button'; b.addEventListener('click', function () { ctl.step(i); }); dw.appendChild(b); dots.push(b); });
+      syncLangs();
       playBtn = bar.querySelector('[data-a="play"]');
       playBtn.addEventListener('click', function () { ctl.toggle(); });
       bar.querySelector('[data-a="prev"]').addEventListener('click', function () {
@@ -1198,20 +1372,26 @@
         else if (i >= n - 1 && !reduce) { ctl.pause(); ctl.seek(lastEnd); } // in the last step: finish it
         else ctl.step(i + 1);
       });
-      wrap.appendChild(bar);
     }
+    if (bar) wrap.appendChild(bar);
     if (opts.key) {
       var keyed2 = L.order.map(function (pid) { return L.parts[pid].p; }).filter(function (p) { return p.n != null && p.name; });
       if (keyed2.length) {
         var ol = document.createElement('ol'); ol.className = 'bp-key';
-        ol.innerHTML = keyed2.sort(function (a, b) { return String(a.n).localeCompare(String(b.n), undefined, { numeric: true }); }).map(function (p) { return '<li><b>' + esc(p.n) + '</b>' + esc(p.name) + (p.note ? ' · <span style="opacity:.75">' + esc(p.note) + '</span>' : '') + '</li>'; }).join('');
+        ol.innerHTML = keyed2.sort(function (a, b) { return String(a.n).localeCompare(String(b.n), undefined, { numeric: true }); }).map(function (p) { return '<li><b>' + esc(p.n) + (p.link ? ' ↗' : '') + '</b>' + (p.link ? ' ' : '') + esc(p.name) + (p.note ? ' · <span style="opacity:.75">' + esc(p.note) + '</span>' : '') + '</li>'; }).join('');
         wrap.appendChild(ol);
       }
     }
-    function onClick() { ctl.toggle(); }
-    function onKey(e) { if (e.key === ' ' || e.key === 'Enter' || e.key === 'Spacebar') { e.preventDefault(); ctl.toggle(); } }
+    var linkOf = function (n) { while (n && n !== svg) { if (n.getAttribute && n.getAttribute('data-link')) return n; n = n.parentNode; } return null; };
+    function onClick(e) { var a = linkOf(e.target); if (a) ctl.open(a.getAttribute('data-link'), a.getAttribute('data-part')); else ctl.toggle(); }
+    function onKey(e) { if (linkOf(e.target)) return; if (e.key === ' ' || e.key === 'Enter' || e.key === 'Spacebar') { e.preventDefault(); ctl.toggle(); } }
+    function onLinkKey(e) {
+      var a = linkOf(e.target);
+      if (a && (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar')) { e.preventDefault(); ctl.open(a.getAttribute('data-link'), a.getAttribute('data-part')); }
+    }
     svg.addEventListener('click', onClick);
-    if (keyboard) { svg.setAttribute('role', 'button'); svg.setAttribute('tabindex', '0'); svg.addEventListener('keydown', onKey); }
+    if (hasLinks) svg.addEventListener('keydown', onLinkKey);
+    if (keyboard) { if (!hasLinks) svg.setAttribute('role', 'button'); svg.setAttribute('tabindex', '0'); svg.addEventListener('keydown', onKey); }
     function onMotion() {
       var was = reduce; reduce = !!mq.matches;
       if (reduce === was || ctl.destroyed) return;
@@ -1225,8 +1405,10 @@
     if (reduce || ctl.mode === 'still') ctl.seek(tl.total);
     else ctl.seek(0);
     // Off-screen scenes leave the frame loop; 'view' scenes start on first sight.
+    // A sheet opened from a link plays at once; one returned to from a link waits where it was.
+    if (resume) { ctl.pause(); ctl.seek(resume.t); }
     if ('IntersectionObserver' in root) {
-      var played = false;
+      var played = !!(resume || opts._autoplay);
       io = new root.IntersectionObserver(function (es) {
         es.forEach(function (e) {
           ctl.visible = e.isIntersecting; ctl._live();
@@ -1235,8 +1417,13 @@
       }, { threshold: 0.35 });
       io.observe(svg);
     }
-    if (!reduce && ctl.mode === 'loop') ctl.play();
+    if (!reduce && !resume && (ctl.mode === 'loop' || (opts._autoplay && ctl.mode !== 'still'))) ctl.play();
     syncBtn();
+    if (opts._focus) {
+      // Keyboard focus follows the reader: to Back on a linked sheet, to the part it came from on return.
+      var fe = opts._focus === 'back' ? backBtn : ID_RE.test(opts._focus) ? q('[data-part="' + opts._focus + '"][tabindex]') : null;
+      if (fe && fe.focus) { try { fe.focus({ preventScroll: true }); } catch (e) { fe.focus(); } }
+    }
     return ctl;
   }
 
@@ -1249,7 +1436,7 @@
   var MISSING_GRACE_MS = 1500;
   function missingScene(el, id) {
     var known = Object.keys(SCENES);
-    var msg = !id ? 'This <blueprint-scene> has no scene attribute.'
+    var msg = !id ? 'This <blueprint-scene> has no scene attribute and no <script type="application/json"> scene inside it.'
       : 'No scene named "' + id + '" has been loaded' + (known.length ? ' (loaded: ' + known.join(', ') + ')' : '') +
         '. Check the scene attribute, and load the scene\'s file after blueprint.js (both with defer, in that order).';
     showError(el, new Error(msg), null, { paper: el.getAttribute('paper') || undefined });
@@ -1257,21 +1444,48 @@
   }
 
   if (HAS_DOM && root.customElements && !root.customElements.get('blueprint-scene')) {
+    // A scene written inline: <blueprint-scene><script type="application/json">{ … }</script></blueprint-scene>
+    var inlineScene = function (el) {
+      return Array.prototype.filter.call(el.children, function (c) { return c.tagName === 'SCRIPT' && /^application\/json$/i.test((c.getAttribute('type') || '').trim()); })[0] || null;
+    };
     var BlueprintScene = class extends HTMLElement {
+      static get observedAttributes() { return ['lang']; }
+      attributeChangedCallback(name, was, val) { if (name === 'lang' && this._c && val) this._c.setLang(val); }
       connectedCallback() {
-        var self = this; if (self._c || self._wait) return;
-        var id = self.getAttribute('scene');
-        var go = function () {
+        var self = this; if (self._c || self._wait || self._dom) return;
+        var id = self.getAttribute('scene'), js = inlineScene(self);
+        // With the runtime in <head> the element connects before its children are parsed:
+        // look again once the page has been read.
+        if (!js && !(id && SCENES[id]) && document.readyState === 'loading') {
+          self._dom = function () { self._dom = null; self.connectedCallback(); };
+          document.addEventListener('DOMContentLoaded', self._dom, { once: true });
+          return;
+        }
+        var go = function (spec) {
           if (self._c || !self.isConnected) return;
           if (self._timer) { clearTimeout(self._timer); self._timer = null; }
           Array.prototype.slice.call(self.children).forEach(function (c) { if (c.className === 'bp-err') self.removeChild(c); });
-          self._c = mount(self, SCENES[id], {
+          self._c = mount(self, spec || SCENES[id], {
             play: self.getAttribute('play') || 'loop', paper: self.getAttribute('paper') || undefined,
             controls: !self.hasAttribute('no-controls'), key: self.hasAttribute('key'), font: !self.hasAttribute('no-font'),
-            speed: self.hasAttribute('speed') ? self.getAttribute('speed') : 1
+            speed: self.hasAttribute('speed') ? self.getAttribute('speed') : 1, lang: self.getAttribute('lang') || undefined,
+            onScene: function (c) { self._c = c; }
           });
         };
-        if (id && SCENES[id]) go();
+        if (js) {
+          var spec;
+          try { spec = JSON.parse(js.textContent); }
+          catch (e) {
+            var bad = new Error('The scene inside this <blueprint-scene> is not valid JSON: ' + e.message);
+            showError(self, bad, null, { paper: self.getAttribute('paper') || undefined });
+            if (root.console) root.console.error('[blueprint] ' + bad.message);
+            return;
+          }
+          // A scene attribute names the inline scene, so linked parts elsewhere can open it.
+          if (id && ID_RE.test(id)) scene(id, spec);
+          go(spec);
+        }
+        else if (id && SCENES[id]) go();
         else {
           // Wait for the scene's file. A scene that has not arrived a moment after the page has
           // loaded is reported in the element's place; if it turns up later it still draws.
@@ -1282,6 +1496,7 @@
         }
       }
       disconnectedCallback() {
+        if (this._dom) { document.removeEventListener('DOMContentLoaded', this._dom); this._dom = null; }
         if (this._timer) { clearTimeout(this._timer); this._timer = null; }
         if (this._wait) { root.removeEventListener('blueprint:scene', this._wait); this._wait = null; }
         if (this._c) { this._c.destroy(); this._c = null; }
@@ -1292,6 +1507,6 @@
 
   return {
     version: VERSION, scene: scene, scenes: SCENES, mount: mount, themes: THEMES, kinds: KINDS,
-    layout: layout, compile: compile, pace: pace, port: port, labelGeom: labelGeom, leaderOf: leaderOf, badgeAt: badgeAt, polyAt: polyAt
+    layout: layout, compile: compile, pace: pace, port: port, cols: cols, langs: sceneLangs, labelGeom: labelGeom, leaderOf: leaderOf, badgeAt: badgeAt, polyAt: polyAt
   };
 });

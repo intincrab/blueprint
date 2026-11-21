@@ -96,6 +96,23 @@ Watch any of them at **[blueprint.intincrab.com](https://blueprint.intincrab.com
 
 ## Put it on a page
 
+No Claude, no install, no build step: one script tag from a CDN, and the scene written into the page as JSON. This works in docs, course pages and blogs.
+
+```html
+<script src="https://cdn.jsdelivr.net/gh/intincrab/blueprint@v0.2.0/runtime/blueprint.js" defer></script>
+
+<blueprint-scene play="view" key>
+  <script type="application/json">
+    { "title": "How a cache works", "size": [640, 320],
+      "parts": [ … ], "lines": [ … ], "steps": [ … ] }
+  </script>
+</blueprint-scene>
+```
+
+The JSON is the same scene format Claude writes (see [craft.md](references/craft.md)), with quoted keys. Pin a version (`@v0.2.0`) so a later release can't change your page.
+
+Or keep scenes in their own files, which is what the skill does:
+
 ```html
 <blueprint-scene scene="cache" play="view" key></blueprint-scene>
 <script src="/blueprint/blueprint.js" defer></script>
@@ -104,14 +121,33 @@ Watch any of them at **[blueprint.intincrab.com](https://blueprint.intincrab.com
 
 | Attribute | What it does |
 |---|---|
+| `scene` | The id of a scene loaded from a file. On an element with inline JSON, it names that scene so links can open it |
 | `play` | `loop` (default), `view` (plays once when scrolled into view), `click`, or `still` (the finished sheet) |
 | `paper` | `blue` (cyanotype, default) or `linen` (ink on cream) |
 | `key` | Shows the numbered parts list under the sheet |
 | `no-controls` | Hides the play, step and replay bar |
 | `speed` | Playback rate of the motion, e.g. `1.25`; rests stay in real time so captions keep their reading time |
+| `lang` | Caption language for a scene written in several, e.g. `zh`. Without it, the reader's browser language picks |
 | `no-font` | Uses the reader's own monospace font instead of fetching IBM Plex Mono from Google Fonts |
 
 Load `blueprint.js` before the scene files; `defer` keeps that order. If a scene can't be found (a misspelled `scene`, or its file loaded before the runtime), the element says so in the sheet's place and in the console.
+
+### Captions in more than one language
+
+Give a step's `say` one caption per language, and the reader gets theirs:
+
+```js
+say: {
+  en: 'So add a drawer (2) by the door that keeps recent answers.',
+  zh: '所以在门边加一个抽屉 (2)，放最近用过的答案。'
+}
+```
+
+The sheet picks the `lang` attribute, else the reader's browser languages, else the first language listed. Buttons in the bar (`EN` `ZH`) switch it while it plays. Each step rests long enough to read its slowest caption (a Chinese, Japanese or Korean character counts as two Latin ones), so one timeline fits every language. Labels and notes on the drawing stay as written. Ask Claude for it (`/blueprint how a cache works, with Chinese captions`), or see [cache.js](examples/small/cache.js). Exports take `--lang zh`.
+
+### Linked sheets
+
+One sheet explains one mechanism. A bigger system becomes a few sheets that link to each other: give a part `link: 'cache'` and clicking it opens the `cache` scene in the same place. A `BACK` button returns to the first sheet where the reader left it. The part's numeral shows the link (`3 ↗`), and it works from the keyboard. The scene being linked to must be loaded on the page too. In [cdn.js](examples/complex/cdn.js), the London edge cache opens [How a cache works](examples/small/cache.js).
 
 Every sheet has play and pause, previous and next step, and a step bar. With reduced motion turned on it shows the finished sheet. The runtime is one file with no dependencies. By default it loads IBM Plex Mono from Google Fonts; add `no-font` (or pass `--no-font` to `build.mjs` and `export.mjs`) and the page makes no outside requests.
 
@@ -153,6 +189,7 @@ The page inlines the runtime and every scene, and lists each scene's `sources` a
 | Path | Purpose |
 |---|---|
 | `SKILL.md` | What Claude reads first: the workflow and the style rules |
+| `CONTRIBUTING.md` | How to add a scene or a part, run the checks and send a pull request |
 | `references/craft.md` | The scene format, the part kit, line kinds, step actions, and which part suits which idea |
 | `runtime/blueprint.js` | Layout, timeline, SVG renderer and the `<blueprint-scene>` element |
 | `templates/scene.js` | A starting scene |

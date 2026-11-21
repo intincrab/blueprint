@@ -17,11 +17,17 @@ BLUEPRINT.scene('cache', {
   ],
   steps: [
     {
-      say: 'The app (1) needs an answer that lives in the database (3).',
+      say: {
+        en: 'The app (1) needs an answer that lives in the database (3).',
+        zh: '应用 (1) 需要一个答案，它存放在数据库 (3) 里。'
+      },
       draw: ['app', 'a1', 'junc', 'a2', 'store', 'gear', 'shaft']
     },
     {
-      say: 'Every request makes the long trip, and every lookup is slow.',
+      say: {
+        en: 'Every request makes the long trip, and every lookup is slow.',
+        zh: '每次请求都要走一趟远路，每次查询都很慢。'
+      },
       run: [
         { on: 'a1', item: 'chip', text: '#42', dur: 0.8 },
         { on: 'a2', item: 'chip', text: '#42', dur: 1.0 },
@@ -32,18 +38,27 @@ BLUEPRINT.scene('cache', {
       note: { at: 'gear.w', text: 'SLOW · ~120 MS' }
     },
     {
-      say: 'So add a drawer (2) by the door that keeps recent answers.',
+      say: {
+        en: 'So add a drawer (2) by the door that keeps recent answers.',
+        zh: '所以在门边加一个抽屉 (2)，放最近用过的答案。'
+      },
       draw: ['up', 'drawer']
     },
     {
-      say: 'A request checks the drawer first. The first time, it is empty.',
+      say: {
+        en: 'A request checks the drawer first. The first time, it is empty.',
+        zh: '请求先查抽屉。第一次查的时候，抽屉是空的。'
+      },
       run: [
         { on: 'a1', item: 'chip', text: '#42', dur: 0.8 },
         { on: 'up', item: 'chip', text: '#42', dur: 0.6, arrive: { fail: ['drawer'] } }
       ]
     },
     {
-      say: 'It fetches from the database and leaves a copy in the drawer.',
+      say: {
+        en: 'It fetches from the database and leaves a copy in the drawer.',
+        zh: '它去数据库取答案，并在抽屉里留一份副本。'
+      },
       run: [
         { on: 'up', back: true, item: 'chip', text: '#42', dur: 0.5 },
         { on: 'a2', item: 'chip', text: '#42', dur: 1.0 },
@@ -55,7 +70,10 @@ BLUEPRINT.scene('cache', {
       spin: ['gear']
     },
     {
-      say: 'Next time the answer comes straight from the drawer. No trip to the database.',
+      say: {
+        en: 'Next time the answer comes straight from the drawer. No trip to the database.',
+        zh: '下次答案直接从抽屉里拿，不用再跑一趟数据库。'
+      },
       run: [
         { on: 'a1', item: 'chip', text: '#42', dur: 0.8 },
         { on: 'up', item: 'chip', text: '#42', dur: 0.5, arrive: { ok: ['drawer'], glow: ['drawer'] } },

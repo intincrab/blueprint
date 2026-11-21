@@ -44,6 +44,7 @@ Ids: letters, digits, `_` and `-`. Parts and lines share one namespace.
 - `name` and `note`: shown in the key under the sheet (`<blueprint-scene key>`). Every numbered part needs both.
 - `hatch: true` on a `box`: fills it with section hatching (use for a base, a wall, something solid or "closed").
 - `muted: true`: draws the label in the muted colour.
+- `link: 'cache'`: clicking the part opens the scene with that id in the same place, with a `BACK` button (see **Linked sheets** below). The part needs a numeral (`n`): the link shows there as `3 ↗`.
 - State keys (below) set the starting state, e.g. `fill: 0`, `open: 1`, `level: 0.8`.
 
 ### The kit
@@ -125,6 +126,7 @@ Each step runs in this order: **draw/erase → run, spin, set, glow… (together
 ```
 
 - Everything except `say` is optional. Parts and lines that no step draws are on the sheet from the start; draw the first ones in step 1 so the sheet builds up.
+- `say` can carry one caption per language: `say: { en: '…', zh: '…' }`. Give every step the same languages, in the same order; the first is the default (see **Languages** below).
 - `set` values tween over half a second. Numbers can be fractional (`level: 0.35`).
 - `note`: `{ at, text, dx, dy, anchor: 'start'|'middle'|'end', keep: true }`. A note stays up until its step ends (`keep: true`: until the loop ends). Notes in the last step stay on the finished sheet. Notes are yellow: use them for numbers and short asides, not sentences.
 - `view`: the camera eases there at the start of the step and stays until another step moves it. It never zooms in closer than about half the sheet. Use it in complex scenes to follow the action, then `view: 'all'` for the summary.
@@ -150,7 +152,34 @@ run: [
 
 ### Timing
 
-A step lasts: draws (0.85 s each, staggered 0.16 s) + runs + `then` (0.9 s) + `hold`. With no `hold`, the rest is at least 1.4 s and grows so the caption stays up for its length at about 17 characters a second (a 70-character caption gets about 4.1 s from the start of the step). An explicit `hold` wins, and `check.mjs` warns when it leaves a caption up too briefly to read. Aim for 3–6 s per step. A small scene runs 15–30 s, a complex one 35–70 s. The loop fades out and starts again.
+A step lasts: draws (0.85 s each, staggered 0.16 s) + runs + `then` (0.9 s) + `hold`. With no `hold`, the rest is at least 1.4 s and grows so the caption stays up for its length at about 17 characters a second (a 70-character caption gets about 4.1 s from the start of the step). A Chinese, Japanese or Korean character counts as two, and a step with captions in several languages rests for the slowest one. An explicit `hold` wins, and `check.mjs` warns when it leaves a caption up too briefly to read. Aim for 3–6 s per step. A small scene runs 15–30 s, a complex one 35–70 s. The loop fades out and starts again.
+
+### Languages
+
+```js
+say: {
+  en: 'So add a drawer (2) by the door that keeps recent answers.',
+  zh: '所以在门边加一个抽屉 (2)，放最近用过的答案。'
+}
+```
+
+- Keys are language codes: `en`, `zh`, `ja`, `pt-BR`. The sheet shows the element's `lang` attribute, else the reader's browser language (`zh-CN` finds `zh`), else the first language. Bar buttons switch it in place.
+- Translate the caption, not the drawing: labels, notes, chips and the title stay as written, because they are sized for the sheet. Keep the numerals `(2)` in every language.
+- Translate the meaning in plain words for that reader; don't transliterate the English. Keep each caption under 120 columns (a CJK character is two).
+- `check.mjs` warns when a step is missing a language the others have. Export one language with `--lang zh`.
+
+### Linked sheets
+
+A big system is several sheets, not one crowded one. Write an overview scene and one scene per part worth opening, in the same file or loaded on the same page, and give the overview's part `link: '<scene id>'`:
+
+```js
+{ id: 'edgeL', kind: 'drawer', at: [300, 110], label: 'EDGE · LHR', n: 3, link: 'cache', name: 'Edge cache', note: '…' }
+```
+
+- Clicking the part (or Enter on it) opens the linked scene in the same place, playing from the start. `BACK · FIG. n` returns to the overview, paused where the reader left it.
+- Give each scene its own `fig` number, so the Back button and the part's tooltip can name it.
+- Link the part the reader will ask about ("what's in that drawer?"), at most two or three per sheet. The overview must still explain the whole on its own.
+- Lint the files together (`check.mjs overview.js cache.js`) so it can check that every link goes somewhere.
 
 ## 5. Layout recipes
 
@@ -195,7 +224,7 @@ A step lasts: draws (0.85 s each, staggered 0.16 s) + runs + `then` (0.9 s) + `h
 | `png` | the finished sheet at 2× | thumbnails, docs, social cards |
 | `png --steps` | one PNG per step's end | slide decks |
 
-`--out` ending in `.png`, `.gif` or `.mp4` sets the file name (each format keeps its own extension; `--steps` adds `-01`, `-02`…). Any other `--out` is a folder. `--scene <id>` picks a scene from a file with several. Exports do not include `sources`.
+`--out` ending in `.png`, `.gif` or `.mp4` sets the file name (each format keeps its own extension; `--steps` adds `-01`, `-02`…). Any other `--out` is a folder. `--scene <id>` picks a scene from a file with several, and `--lang zh` the caption language of a scene written in several. Exports do not include `sources`, and a link is just a numeral in a GIF or PNG.
 
 `--speed` speeds up only the motion: the rests play in real seconds, so every caption keeps its reading time. The `speed` attribute on the element works the same way.
 

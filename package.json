@@ -1,10 +1,33 @@
 {
-  "name": "blueprint",
-  "version": "0.1.0",
-  "private": true,
-  "description": "Claude Code skill: animated explainers drawn like patent sheets.",
+  "name": "@intincrab/blueprint",
+  "version": "0.2.0",
+  "description": "Animated explainers drawn like patent sheets: a zero-dependency <blueprint-scene> runtime, and the Claude Code skill that writes the scenes.",
   "license": "MIT",
+  "homepage": "https://blueprint.intincrab.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/intincrab/blueprint.git"
+  },
+  "bugs": {
+    "url": "https://github.com/intincrab/blueprint/issues"
+  },
+  "keywords": [
+    "explainer",
+    "diagram",
+    "animation",
+    "svg",
+    "web-component",
+    "claude-code",
+    "patent-drawing"
+  ],
   "type": "commonjs",
+  "main": "runtime/blueprint.js",
+  "browser": "runtime/blueprint.js",
+  "jsdelivr": "runtime/blueprint.js",
+  "unpkg": "runtime/blueprint.js",
+  "files": [
+    "runtime/blueprint.js"
+  ],
   "engines": {
     "node": ">=18"
   },

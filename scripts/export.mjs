@@ -10,6 +10,7 @@
 // Options: --out <file or folder> --width 1280 --fps (gif 15, mp4 30) --speed (gif 1.8, mp4 1.25; motion only,
 //          the rests that leave time to read each caption play in real seconds)
 //          --paper blue|linen --hold 1.5 --scale (png 2, else 1) --scene <id> --audio track.mp3 (mp4)
+//          --lang zh (captions in that language, for a scene written in several; default: its first)
 // --out: a name ending in .png, .gif or .mp4 sets the file name, and every format gets its own
 // extension (--out talk/cache.mp4 --format all -> talk/cache.png, .gif, .mp4; with --steps,
 // talk/cache-01.png, -02.png …). Anything else is a folder. Without --out, files go next to the
@@ -31,8 +32,8 @@ import { launchChromium } from './lib/chromium.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url)), root = resolve(here, '..');
 const require = createRequire(import.meta.url);
-const USAGE = 'usage: export.mjs scene.js --format gif|mp4|png|all (or a list: png,gif) [--out path] [--steps] [--scene id] [--paper blue|linen] [--audio track.mp3] [--width 1280] [--fps n] [--speed n] [--hold s] [--scale n] [--encoder ffmpeg|browser] [--no-font]';
-const VALUED = ['format', 'out', 'width', 'fps', 'speed', 'paper', 'hold', 'scale', 'audio', 'scene', 'encoder'], FLAGS = ['steps', 'no-font'];
+const USAGE = 'usage: export.mjs scene.js --format gif|mp4|png|all (or a list: png,gif) [--out path] [--steps] [--scene id] [--paper blue|linen] [--lang code] [--audio track.mp3] [--width 1280] [--fps n] [--speed n] [--hold s] [--scale n] [--encoder ffmpeg|browser] [--no-font]';
+const VALUED = ['format', 'out', 'width', 'fps', 'speed', 'paper', 'lang', 'hold', 'scale', 'audio', 'scene', 'encoder'], FLAGS = ['steps', 'no-font'];
 const argv = process.argv.slice(2), opt = {}, files = [];
 const die = (msg, code = 2) => { console.error(`${msg}\n${USAGE}`); process.exit(code); };
 for (let i = 0; i < argv.length; i++) {
@@ -100,21 +101,26 @@ async function open(scale, speed = 1) {
   p.on('pageerror', e => console.log('PAGE ERROR', String(e)));
   await p.goto(pathToFileURL(join(work, 'page.html')).href);
   await p.evaluate(() => document.fonts.ready.then(() => document.fonts.load('500 12px "IBM Plex Mono"')).catch(() => {}));
-  const info = await p.evaluate(([paper, want, speed]) => {
+  const info = await p.evaluate(([paper, want, speed, lang]) => {
     const ids = Object.keys(BLUEPRINT.scenes);
     if (!ids.length) return { error: 'the file defines no scene' };
     if (want && !BLUEPRINT.scenes[want]) return { error: `no scene "${want}" in the file (it has: ${ids.join(', ')})` };
     const id = want || ids[0];
-    window.C = BLUEPRINT.mount(document.getElementById('h'), BLUEPRINT.scenes[id], { play: 'still', controls: false, font: false, paper: paper || undefined, speed });
-    return { id, ids, total: window.C.timeline.total, steps: window.C.timeline.steps.map(s => ({ a: s.a, b: s.b, say: s.say })) };
-  }, [opt.paper, opt.scene, speed]);
+    window.C = BLUEPRINT.mount(document.getElementById('h'), BLUEPRINT.scenes[id], { play: 'still', controls: false, font: false, paper: paper || undefined, speed, lang: lang || undefined });
+    return { id, ids, lang: window.C.lang, langs: window.C.langs, total: window.C.timeline.total, steps: window.C.timeline.steps.map(s => ({ a: s.a, b: s.b, say: s.say })) };
+  }, [opt.paper, opt.scene, speed, opt.lang]);
   if (info.error) await fail(info.error);
+  if (opt.lang) {
+    const base = l => String(l).toLowerCase().split('-')[0];
+    if (!info.langs.length) { if (!langNoted++) console.warn(`warn: the scene's captions are in one language; --lang ${opt.lang} changes nothing`); }
+    else if (base(info.lang) !== base(opt.lang)) await fail(`the scene has no "${opt.lang}" captions (it has: ${info.langs.join(', ')})`);
+  }
   if (info.ids.length > 1 && !opt.scene && !noted++) console.warn(`warn: ${files[0]} has ${info.ids.length} scenes (${info.ids.join(', ')}); exporting "${info.id}". Pick one with --scene <id>.`);
   const clip = await p.locator('#h .bp-svg').boundingBox();
   const shot = async t => { await p.evaluate(t => window.C.seek(t), t); return p.screenshot({ clip, type: 'png', omitBackground: false }); };
   return { p, info, clip, shot };
 }
-let noted = 0;
+let noted = 0, langNoted = 0;
 const written = [];
 // Progress only in a terminal: piped output (an agent reading it) gets just the results.
 const progress = process.stdout.isTTY ? s => process.stdout.write(`\r\x1b[K  ${s}`) : () => {};

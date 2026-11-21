@@ -46,6 +46,13 @@ The drawing is done by `runtime/blueprint.js`. You never draw SVG: you write a s
    ```
    (`blueprint.js` must come first in document order), or export one page: `node <skill-dir>/scripts/build.mjs scene.js --out scene.html`.
 
+   For a page with no build step or nowhere to put files (docs, a course page, a CMS), load the runtime from the CDN and put the scene inside the element as JSON (quoted keys, no comments or functions):
+   ```html
+   <script src="https://cdn.jsdelivr.net/gh/intincrab/blueprint@v0.2.0/runtime/blueprint.js" defer></script>
+   <blueprint-scene play="view" key><script type="application/json">{ "title": "…", "parts": […], "lines": […], "steps": […] }</script></blueprint-scene>
+   ```
+   Lint and look at it as a `.js` file first, then paste the object in as JSON.
+
    When the user asks for a GIF, video, image or slides, or the sheet is going somewhere that cannot run JavaScript (a GitHub README, Slack, X, Notion, a deck), export it:
    ```sh
    node <skill-dir>/scripts/export.mjs scene.js --format gif     # README, Slack
@@ -64,7 +71,16 @@ The drawing is done by `runtime/blueprint.js`. You never draw SVG: you write a s
 - `no-controls`: hides the play, step and replay bar. Clicking the sheet still pauses and plays.
 - `no-font`: does not load IBM Plex Mono from Google Fonts.
 - `speed`: playback rate of the motion, e.g. `speed="1.25"`. Rests play in real seconds, so captions keep their reading time.
+- `lang`: the caption language for a scene written in several (`lang="zh"`). Without it the reader's browser language picks, then the first language.
 - Reduced motion shows the finished sheet; the step buttons jump between finished steps. Off-screen scenes do not animate.
+
+## Captions in other languages
+
+When the user asks for captions in another language, or the audience reads one, give every step's `say` one caption per language: `say: { en: '…', zh: '…' }`, the user's main language first. Translate the meaning in plain words, keep the numerals `(2)`, and leave labels, notes and the title as they are. The reader's browser picks the language and bar buttons switch it. `check.mjs` flags a step missing a language, and `export.mjs --lang zh` exports one. Details in craft.md, **Languages**.
+
+## Big systems: linked sheets
+
+When one sheet would need more than about 14 parts, don't cram it. Make an overview scene whose parts stand for whole subsystems, and one scene per subsystem worth opening, each with its own `fig`. Give the overview's part `link: '<scene id>'` and a numeral: clicking it opens that sheet in place, with a `BACK` button. Put all the scenes in one file (or load every file on the page) and lint them together. Details in craft.md, **Linked sheets**.
 
 ## Incident sheets
 

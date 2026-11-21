@@ -44,12 +44,18 @@ const PORT_RE = /^([A-Za-z0-9_-]+)(?:\.(n|s|e|w|c|ne|nw|se|sw))?(?:([+-]\d+(?:\.
 const endId = r => { if (Array.isArray(r)) return null; const m = PORT_RE.exec(String(r)); return m ? m[1] : null; };
 
 let failed = 0;
+// Load every file first, so a linked part can find a scene defined in another file checked with it.
+const loaded = [];
 for (const f of files) {
   const code = readFileSync(resolve(f), 'utf8');
   const got = {};
   try { vm.runInNewContext(code, { BLUEPRINT: { scene: (id, spec) => (got[id] = spec) } }, { filename: f }); }
   catch (e) { console.log(`\n${f}\n  ERROR  the file does not run: ${e.message}`); failed++; continue; }
   if (!Object.keys(got).length) { console.log(`\n${f}\n  ERROR  the file defines no scene (call BLUEPRINT.scene('id', { … }))`); failed++; continue; }
+  loaded.push([f, got]);
+}
+const allIds = new Set(loaded.flatMap(([, got]) => Object.keys(got)));
+for (const [f, got] of loaded) {
   for (const [id, spec] of Object.entries(got)) {
     const L = BP.layout(spec), tl = BP.compile(spec, L), W = L.W, H = L.H;
     const warn = [...L.warnings], err = [...L.errors];
@@ -185,17 +191,31 @@ for (const f of files) {
       const up = tl.marks.filter(m => m.id === pid).map(m => [m.a, m.b ?? Infinity]);
       for (const [nm, r, owner, tw] of texts) if (owner !== pid && !rects.some(x => x[0] === nm) && up.some(w => meets(w, tw)) && hit(badge, r, 1)) warn.push(`the ✓/✕ badge on "${pid}" covers ${nm}`);
     }
-    tl.steps.forEach((s, i) => { if (s.say.length > 120) warn.push(`step ${i + 1}: caption is ${s.say.length} chars; keep it under 120`); });
+    // Captions in every language: CJK characters count as two columns, like on the sheet.
+    const captions = s => s.says ? Object.entries(s.says) : [['', s.say]];
+    const inLang = k => (k && tl.langs.length > 1 ? ` (${k})` : '');
+    tl.steps.forEach((s, i) => { for (const [k, text] of captions(s)) { const c = BP.cols(text); if (c > 120) warn.push(`step ${i + 1}: caption${inLang(k)} is ${c} columns wide; keep it under 120 (a CJK character counts as 2)`); } });
     // A default rest always leaves time to read; an explicit hold can cut it short. The last
     // caption stays up until the sheet fades out.
     tl.steps.forEach((s, i) => {
       const up = (i === tl.steps.length - 1 ? tl.period : s.b) - s.a, short = s.read - up;
-      if (s.held && short > 0.05) warn.push(`step ${i + 1}: caption is up ${up.toFixed(1)} s but needs about ${s.read.toFixed(1)} s to read (${s.say.length} chars at 17 a second); raise "hold" to ${(s.b - s.r + short).toFixed(1)} or drop it for the default rest`);
+      const [k, text] = captions(s).reduce((m, x) => (BP.cols(x[1]) > BP.cols(m[1]) ? x : m));
+      if (s.held && short > 0.05) warn.push(`step ${i + 1}: caption${inLang(k)} is up ${up.toFixed(1)} s but needs about ${s.read.toFixed(1)} s to read (${BP.cols(text)} columns at 17 a second); raise "hold" to ${(s.b - s.r + short).toFixed(1)} or drop it for the default rest`);
     });
+    // Linked parts open another sheet: it should exist, and the part needs its numeral, where the ↗ shows.
+    const notes = [];
+    for (const pid of L.order) {
+      const link = L.parts[pid].p.link;
+      if (!link) continue;
+      if (link === id) warn.push(`part "${pid}" links to its own scene`);
+      else if (!allIds.has(link)) notes.push(`part "${pid}" links to scene "${link}", which is not in the files checked; load its file on the page too, and check both files together`);
+      if (L.parts[pid].p.n == null) warn.push(`part "${pid}" has a link but no numeral ("n"), so nothing on the sheet shows the link`);
+    }
     const T = tl.total;
-    console.log(`\n${f}  ·  ${id}  ·  ${tl.steps.length} steps  ·  ${T.toFixed(1)} s  ·  ${L.order.length} parts, ${Object.keys(L.lines).length} lines`);
+    console.log(`\n${f}  ·  ${id}  ·  ${tl.steps.length} steps  ·  ${T.toFixed(1)} s  ·  ${L.order.length} parts, ${Object.keys(L.lines).length} lines${tl.langs.length ? '  ·  captions in ' + tl.langs.join(', ') : ''}`);
     [...new Set(err)].forEach(e => console.log('  ERROR  ' + e));
     [...new Set(warn)].forEach(w => console.log('  warn   ' + w));
+    notes.forEach(n => console.log('  note   ' + n));
     if (!err.length && !warn.length) console.log('  clean');
     if (err.length) failed++;
   }

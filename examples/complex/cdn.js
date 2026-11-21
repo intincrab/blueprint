@@ -14,7 +14,7 @@ BLUEPRINT.scene('cdn', {
     { id: 'userS', kind: 'screen', at: [80, 300], size: [100, 70], label: 'READER' },
     { id: 'origin', kind: 'cabinet', at: [650, 190], size: [80, 100], rows: 4, label: 'ORIGIN', labelAt: 'e', n: 2, lead: 'sw', name: 'Origin', note: 'the one server that holds the real files, in Mumbai' },
     { id: 'gear', kind: 'gear', at: [650, 92], size: [40, 40], teeth: 12 },
-    { id: 'edgeL', kind: 'drawer', at: [300, 110], size: [90, 40], label: 'EDGE · LHR', n: 3, lead: 'n', name: 'Edge cache', note: 'a drawer of copies a few km from readers; 300+ cities' },
+    { id: 'edgeL', kind: 'drawer', at: [300, 110], size: [90, 40], label: 'EDGE · LHR', n: 3, lead: 'n', link: 'cache', name: 'Edge cache', note: 'a drawer of copies a few km from readers; 300+ cities' },
     { id: 'edgeS', kind: 'drawer', at: [300, 300], size: [90, 40], label: 'EDGE · SYD' },
     { id: 'clock', kind: 'clock', at: [190, 66], size: [36, 36], label: 'TTL 24 H', labelAt: 'e', n: 4, lead: 'n', name: 'Timer (TTL)', note: 'how long an edge trusts its copy, e.g. 24 hours' },
     { id: 'tower', kind: 'tower', at: [650, 322], size: [36, 64], label: 'PURGE', labelAt: 'e', n: 5, lead: 'w', name: 'Purge', note: 'tells every edge to drop a file, done in ~2 S worldwide' }
